@@ -50,7 +50,7 @@ private data class Category(val title: String, val subtitle: String, val icon: I
 private fun FileManagerHome() {
     val context = LocalContext.current
     val preferences = remember {
-        context.getSharedPreferences("mth_file_manager", ComponentActivity.MODE_PRIVATE)
+        context.getSharedPreferences("mth_file_manager", android.content.Context.MODE_PRIVATE)
     }
     var selectedTab by remember { mutableIntStateOf(0) }
     var treeUriText by remember { mutableStateOf(preferences.getString("tree_uri", null)) }
