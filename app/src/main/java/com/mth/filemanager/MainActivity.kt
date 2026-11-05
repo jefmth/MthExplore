@@ -93,12 +93,6 @@ private fun FileManagerHome() {
         if (rootFolder != null) currentFolder = rootFolder
     }
 
-    // Na primeira abertura, apresenta automaticamente o seletor oficial do Android.
-    // O usuário escolhe o armazenamento uma única vez; a autorização fica salva.
-    LaunchedEffect(Unit) {
-        if (treeUriText == null) folderPicker.launch(null)
-    }
-
     val folderPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
@@ -114,6 +108,12 @@ private fun FileManagerHome() {
                 Toast.makeText(context, "Não foi possível autorizar esta pasta.", Toast.LENGTH_LONG).show()
             }
         }
+    }
+
+    // Na primeira abertura, apresenta automaticamente o seletor oficial do Android.
+    // O usuário escolhe o armazenamento uma única vez; a autorização fica salva.
+    LaunchedEffect(Unit) {
+        if (treeUriText == null) folderPicker.launch(null)
     }
 
     val categories = listOf(
