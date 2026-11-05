@@ -2,18 +2,18 @@ package com.mth.filemanager
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -21,430 +21,255 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.documentfile.provider.DocumentFile
+import androidx.core.content.FileProvider
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import java.io.File
 import java.util.Locale
+
+private val Teal = Color(0xFF008F83)
+private val Page = Color(0xFFF3F7F6)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MthFileManagerApp() }
+        window.statusBarColor = android.graphics.Color.rgb(0, 143, 131)
+        window.navigationBarColor = android.graphics.Color.rgb(0, 143, 131)
+        setContent { MthExploreApp() }
     }
 }
 
 @Composable
-private fun MthFileManagerApp() {
-    val colors = if (isSystemInDarkTheme()) {
-        darkColorScheme(
-            primary = androidx.compose.ui.graphics.Color(0xFF008F83),
-            secondary = androidx.compose.ui.graphics.Color(0xFF008F83),
-            background = androidx.compose.ui.graphics.Color(0xFF101817),
-            surface = androidx.compose.ui.graphics.Color(0xFF17211F),
-            primaryContainer = androidx.compose.ui.graphics.Color(0xFFBDECE5),
-            onPrimaryContainer = androidx.compose.ui.graphics.Color(0xFF003731),
-            surfaceVariant = androidx.compose.ui.graphics.Color(0xFFEAF2F0),
-            onSurfaceVariant = androidx.compose.ui.graphics.Color(0xFF52615E)
-        )
-    } else {
-        lightColorScheme(
-            primary = androidx.compose.ui.graphics.Color(0xFF008F83),
-            secondary = androidx.compose.ui.graphics.Color(0xFF008F83),
-            background = androidx.compose.ui.graphics.Color(0xFFF3F7F6),
-            surface = androidx.compose.ui.graphics.Color(0xFFFFFFFF),
-            primaryContainer = androidx.compose.ui.graphics.Color(0xFFDDF3EF),
-            onPrimaryContainer = androidx.compose.ui.graphics.Color(0xFF123B37),
-            surfaceVariant = androidx.compose.ui.graphics.Color(0xFFFFFFFF),
-            onSurfaceVariant = androidx.compose.ui.graphics.Color(0xFF68777B)
-        )
-    }
-    MaterialTheme(colorScheme = colors) {
-        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            FileManagerHome()
-        }
+private fun MthExploreApp() {
+    MaterialTheme(colorScheme = lightColorScheme(
+        primary = Teal, secondary = Teal, background = Page, surface = Color.White,
+        surfaceVariant = Color.White, onSurface = Color(0xFF1C2B32),
+        onSurfaceVariant = Color(0xFF68777B)
+    )) {
+        Surface(Modifier.fillMaxSize(), color = Page) { ExplorerScreen() }
     }
 }
-
-private data class Category(val title: String, val subtitle: String, val icon: ImageVector)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun FileManagerHome() {
+private fun ExplorerScreen() {
     val context = LocalContext.current
-    val preferences = remember {
-        context.getSharedPreferences("mth_file_manager", android.content.Context.MODE_PRIVATE)
-    }
-    var selectedTab by remember { mutableIntStateOf(0) }
-    var treeUriText by remember { mutableStateOf(preferences.getString("tree_uri", null)) }
-    var currentFolder by remember { mutableStateOf<DocumentFile?>(null) }
-    var refreshKey by remember { mutableIntStateOf(0) }
-    var showCreateFolder by remember { mutableStateOf(false) }
-    var newFolderName by remember { mutableStateOf("") }
-    var selectedItem by remember { mutableStateOf<DocumentFile?>(null) }
-    var renameValue by remember { mutableStateOf("") }
-    var showDeleteConfirmation by remember { mutableStateOf(false) }
+    val activity = context as MainActivity
+    val owner = LocalLifecycleOwner.current
+    var allowed by remember { mutableStateOf(hasAccess()) }
+    var folder by remember { mutableStateOf(Environment.getExternalStorageDirectory()) }
+    var refresh by remember { mutableIntStateOf(0) }
+    var search by remember { mutableStateOf("") }
+    var searching by remember { mutableStateOf(false) }
+    var tab by remember { mutableIntStateOf(0) }
+    var menuFile by remember { mutableStateOf<File?>(null) }
 
-    val rootFolder = remember(treeUriText) {
-        treeUriText?.let { DocumentFile.fromTreeUri(context, Uri.parse(it)) }
-    }
-
-    LaunchedEffect(treeUriText) {
-        if (rootFolder != null) currentFolder = rootFolder
-    }
-
-    val folderPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
-    ) { uri ->
-        if (uri != null) {
-            try {
-                val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                context.contentResolver.takePersistableUriPermission(uri, flags)
-                preferences.edit().putString("tree_uri", uri.toString()).apply()
-                treeUriText = uri.toString()
-                currentFolder = DocumentFile.fromTreeUri(context, uri)
-                selectedTab = 1
-            } catch (_: Exception) {
-                Toast.makeText(context, "Não foi possível autorizar esta pasta.", Toast.LENGTH_LONG).show()
+    DisposableEffect(owner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                allowed = hasAccess()
+                refresh++
             }
         }
+        owner.lifecycle.addObserver(observer)
+        onDispose { owner.lifecycle.removeObserver(observer) }
     }
 
-    // Na primeira abertura, apresenta automaticamente o seletor oficial do Android.
-    // O usuário escolhe o armazenamento uma única vez; a autorização fica salva.
-    LaunchedEffect(Unit) {
-        if (treeUriText == null) folderPicker.launch(null)
+    BackHandler(folder.absolutePath != Environment.getExternalStorageDirectory().absolutePath) {
+        folder.parentFile?.let { folder = it; refresh++ }
     }
 
-    val categories = listOf(
-        Category("Imagens", "Fotos e imagens", Icons.Default.Image),
-        Category("Vídeos", "Vídeos do dispositivo", Icons.Default.VideoLibrary),
-        Category("Áudios", "Músicas e gravações", Icons.Default.MusicNote),
-        Category("Documentos", "PDF, TXT e outros", Icons.Default.InsertDriveFile)
-    )
+    val files = remember(folder.absolutePath, refresh, search, allowed) {
+        if (!allowed) emptyList() else folder.listFiles()
+            ?.filter { it.name.contains(search, ignoreCase = true) }
+            ?.sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase(Locale.getDefault()) })
+            ?: emptyList()
+    }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("MthExplore", style = MaterialTheme.typography.headlineMedium)
-                        Text(
-                            if (selectedTab == 1) currentFolder?.name ?: "Arquivos" else "Gerenciador de arquivos",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("MthExplore", style = MaterialTheme.typography.headlineMedium, color = Color(0xFF1C2B32))
+                        Text(if (folder.absolutePath == Environment.getExternalStorageDirectory().absolutePath)
+                            "Explore seus arquivos" else folder.name,
+                            style = MaterialTheme.typography.titleMedium, color = Color(0xFF68777B))
                     }
-                },
-                navigationIcon = {
-                    if (selectedTab == 1 && currentFolder != null && rootFolder != null &&
-                        currentFolder?.uri != rootFolder.uri
-                    ) {
-                        IconButton(onClick = {
-                            currentFolder = currentFolder?.parentFile ?: rootFolder
-                            refreshKey++
-                        }) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Voltar")
-                        }
-                    }
-                },
-                actions = {
-                    if (selectedTab == 1 && currentFolder != null) {
-                        IconButton(onClick = { showCreateFolder = true }) {
-                            Icon(Icons.Default.CreateNewFolder, contentDescription = "Criar pasta")
-                        }
-                    }
-                    IconButton(onClick = { selectedTab = 2 }) {
-                        Icon(Icons.Default.Settings, contentDescription = "Configurações")
+                    IconButton(onClick = { searching = !searching; search = "" }) {
+                        Icon(Icons.Default.Search, "Pesquisar", tint = Teal)
                     }
                 }
-            )
+                if (searching) OutlinedTextField(
+                    value = search, onValueChange = { search = it },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    placeholder = { Text("Pesquisar nesta pasta") },
+                    leadingIcon = { Icon(Icons.Default.Search, null) },
+                    trailingIcon = { IconButton(onClick = { search = "" }) { Icon(Icons.Default.Close, "Limpar") } }
+                )
+            }
         },
         bottomBar = {
-            NavigationBar {
-                NavigationBarItem(selectedTab == 0, { selectedTab = 0 },
+            NavigationBar(containerColor = Color.White) {
+                NavigationBarItem(tab == 0, { tab = 0; folder = Environment.getExternalStorageDirectory(); refresh++ },
                     icon = { Icon(Icons.Default.Home, null) }, label = { Text("Início") })
-                NavigationBarItem(selectedTab == 1, { selectedTab = 1 },
+                NavigationBarItem(tab == 1, { tab = 1; refresh++ },
                     icon = { Icon(Icons.Default.Folder, null) }, label = { Text("Arquivos") })
-                NavigationBarItem(selectedTab == 2, { selectedTab = 2 },
+                NavigationBarItem(tab == 2, { tab = 2 },
                     icon = { Icon(Icons.Default.Settings, null) }, label = { Text("Ajustes") })
             }
-        }
-    ) { padding ->
-        when (selectedTab) {
-            0 -> HomeContent(
-                padding, categories, rootFolder != null,
-                { folderPicker.launch(null) }, { selectedTab = 1 }
-            )
-            1 -> FileBrowserContent(
-                padding, currentFolder, refreshKey,
-                { folderPicker.launch(null) },
-                { currentFolder = it },
-                { openFile(context, it) },
-                {
-                    selectedItem = it
-                    renameValue = it.name ?: ""
-                }
-            )
-            else -> PlaceholderContent(
-                padding, "Configurações",
-                "O tema claro ou escuro acompanha a configuração do Android."
-            )
-        }
-    }
-
-    if (showCreateFolder) {
-        AlertDialog(
-            onDismissRequest = { showCreateFolder = false },
-            title = { Text("Nova pasta") },
-            text = {
-                OutlinedTextField(
-                    value = newFolderName,
-                    onValueChange = { newFolderName = it },
-                    label = { Text("Nome da pasta") },
-                    singleLine = true
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val name = newFolderName.trim()
-                    if (name.isNotEmpty()) {
-                        val created = currentFolder?.createDirectory(name)
-                        Toast.makeText(
-                            context,
-                            if (created != null) "Pasta criada." else "Não foi possível criar a pasta.",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                        refreshKey++
-                    }
-                    newFolderName = ""
-                    showCreateFolder = false
-                }) { Text("Criar") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCreateFolder = false }) { Text("Cancelar") }
-            }
-        )
-    }
-
-    selectedItem?.let { item ->
-        AlertDialog(
-            onDismissRequest = { selectedItem = null },
-            title = { Text(item.name ?: "Item selecionado") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = renameValue,
-                        onValueChange = { renameValue = it },
-                        label = { Text("Novo nome") },
-                        singleLine = true
-                    )
-                    TextButton(onClick = {
-                        val ok = renameValue.trim().isNotEmpty() && item.renameTo(renameValue.trim())
-                        Toast.makeText(context, if (ok) "Item renomeado." else "Não foi possível renomear.", Toast.LENGTH_SHORT).show()
-                        selectedItem = null
-                        refreshKey++
-                    }) { Text("Renomear") }
-                    TextButton(onClick = { showDeleteConfirmation = true }) {
-                        Text("Excluir", color = MaterialTheme.colorScheme.error)
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { selectedItem = null }) { Text("Fechar") }
-            }
-        )
-    }
-
-    if (showDeleteConfirmation && selectedItem != null) {
-        AlertDialog(
-            onDismissRequest = { showDeleteConfirmation = false },
-            title = { Text("Excluir item?") },
-            text = { Text("O item será removido do armazenamento selecionado. Esta ação não poderá ser desfeita pelo aplicativo.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    val deleted = selectedItem?.delete() == true
-                    Toast.makeText(context, if (deleted) "Item excluído." else "Não foi possível excluir.", Toast.LENGTH_SHORT).show()
-                    showDeleteConfirmation = false
-                    selectedItem = null
-                    refreshKey++
-                }) { Text("Excluir", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteConfirmation = false }) { Text("Cancelar") }
-            }
-        )
-    }
-}
-
-@Composable
-private fun HomeContent(
-    padding: PaddingValues,
-    categories: List<Category>,
-    hasStorage: Boolean,
-    onChooseStorage: () -> Unit,
-    onOpenFiles: () -> Unit
-) {
-    Column(
-        Modifier.fillMaxSize().padding(padding).padding(horizontal = 18.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
-    ) {
-        Spacer(Modifier.height(2.dp))
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(22.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-        ) {
-            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(Icons.Default.Storage, contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer)
-                Text("Seus arquivos", style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer)
-                Text(
-                    if (hasStorage) "Armazenamento conectado. Explore suas pastas e arquivos."
-                    else "Escolha o armazenamento interno ou cartão SD para começar a explorar.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-                OutlinedButton(onClick = onChooseStorage) {
-                    Text(if (hasStorage) "Adicionar outro local" else "Explorar armazenamento")
-                }
-                if (hasStorage) TextButton(onClick = onOpenFiles) { Text("Abrir arquivos") }
-            }
-        }
-        Text("Explorar por categoria", style = MaterialTheme.typography.titleLarge)
-        androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-            columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(2),
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(bottom = 18.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            items(categories.size) { index ->
-                val category = categories[index]
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                ) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Icon(category.icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Text(category.title, style = MaterialTheme.typography.titleMedium)
-                        Text(category.subtitle, style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun FileBrowserContent(
-    padding: PaddingValues,
-    folder: DocumentFile?,
-    refreshKey: Int,
-    onChooseStorage: () -> Unit,
-    onOpenFolder: (DocumentFile) -> Unit,
-    onOpenFile: (DocumentFile) -> Unit,
-    onItemMenu: (DocumentFile) -> Unit
-) {
-    val files = remember(folder?.uri, refreshKey) {
-        folder?.listFiles()?.sortedWith(
-            compareBy<DocumentFile> { !it.isDirectory }
-                .thenBy { it.name?.lowercase(Locale.getDefault()) ?: "" }
-        ) ?: emptyList()
-    }
-
-    if (folder == null) {
-        Column(
-            Modifier.fillMaxSize().padding(padding).padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Icon(Icons.Default.Storage, contentDescription = null)
-            Spacer(Modifier.height(12.dp))
-            Text("Nenhum armazenamento selecionado", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(8.dp))
-            Text("Escolha uma pasta do armazenamento interno ou do cartão SD.")
-            Spacer(Modifier.height(16.dp))
-            OutlinedButton(onClick = onChooseStorage) { Text("Selecionar pasta") }
-        }
-    } else if (files.isEmpty()) {
-        Column(
-            Modifier.fillMaxSize().padding(padding).padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Icon(Icons.Default.Folder, contentDescription = null)
-            Spacer(Modifier.height(8.dp))
-            Text("Esta pasta está vazia", style = MaterialTheme.typography.titleMedium)
-        }
-    } else {
-        LazyColumn(
-            Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-        ) {
-            items(files, key = { it.uri.toString() }) { file ->
-                FileRow(
-                    file,
-                    onClick = { if (file.isDirectory) onOpenFolder(file) else onOpenFile(file) },
-                    onMenu = { onItemMenu(file) }
-                )
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun FileRow(file: DocumentFile, onClick: () -> Unit, onMenu: () -> Unit) {
-    val icon = if (file.isDirectory) Icons.Default.Folder else Icons.Default.InsertDriveFile
-    val detail = if (file.isDirectory) "Pasta" else formatSize(file.length()) + " • " + (file.type ?: "Arquivo")
-
-    ListItem(
-        headlineContent = { Text(file.name ?: "Sem nome", maxLines = 1) },
-        supportingContent = { Text(detail, maxLines = 1) },
-        leadingContent = { Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-        trailingContent = {
-            IconButton(onClick = onMenu) {
-                Icon(Icons.Default.MoreVert, contentDescription = "Mais opções")
-            }
         },
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
-    )
+        containerColor = Page
+    ) { padding ->
+        when {
+            !allowed -> Column(
+                Modifier.fillMaxSize().padding(padding).padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(Icons.Default.FolderOpen, null, tint = Teal, modifier = Modifier.size(64.dp))
+                Text("Acesso aos arquivos", style = MaterialTheme.typography.headlineSmall)
+                Text("Para explorar o conteúdo do celular sem escolher uma pasta, autorize o acesso a todos os arquivos nas configurações do Android.")
+                Button(onClick = {
+                    val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        Uri.parse("package:" + context.packageName))
+                    try { activity.startActivity(intent) }
+                    catch (_: Exception) { activity.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)) }
+                }) { Text("Autorizar acesso aos arquivos") }
+            }
+            tab == 2 -> Column(Modifier.fillMaxSize().padding(padding).padding(24.dp)) {
+                Text("Ajustes", style = MaterialTheme.typography.headlineSmall)
+                Text("Acesso aos arquivos do dispositivo autorizado pelo Android.")
+            }
+            else -> Column(Modifier.fillMaxSize().padding(padding)) {
+                Card(
+                    Modifier.fillMaxWidth().padding(horizontal = 18.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = Teal)
+                ) {
+                    Row(Modifier.fillMaxWidth().clickable {
+                        folder = Environment.getExternalStorageDirectory(); tab = 1; refresh++
+                    }.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Storage, null, tint = Color.White, modifier = Modifier.size(38.dp))
+                        Column(Modifier.weight(1f).padding(start = 16.dp)) {
+                            Text("Armazenamento interno", color = Color.White, style = MaterialTheme.typography.titleLarge)
+                            Text(files.size.toString() + " itens nesta pasta", color = Color.White)
+                        }
+                        Icon(Icons.Default.ChevronRight, null, tint = Color.White)
+                    }
+                }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 18.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (folder.absolutePath == Environment.getExternalStorageDirectory().absolutePath)
+                        "Pastas do dispositivo" else folder.name,
+                        Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                    if (folder.absolutePath != Environment.getExternalStorageDirectory().absolutePath)
+                        IconButton(onClick = { folder.parentFile?.let { folder = it }; refresh++ }) {
+                            Icon(Icons.Default.ArrowUpward, "Pasta anterior")
+                        }
+                }
+                if (files.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Nenhum arquivo encontrado nesta pasta.", color = Color.Gray)
+                } else LazyColumn(
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(files, key = { it.absolutePath }) { file ->
+                        Card(Modifier.fillMaxWidth().clickable {
+                            if (file.isDirectory) { folder = file; tab = 1; search = ""; refresh++ }
+                            else openFile(context, file)
+                        }, shape = RoundedCornerShape(17.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            elevation = CardDefaults.cardElevation(1.dp)) {
+                            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Icon(if (file.isDirectory) Icons.Default.Folder else iconFor(file),
+                                    null, tint = Teal, modifier = Modifier.size(34.dp))
+                                Column(Modifier.weight(1f).padding(start = 16.dp)) {
+                                    Text(file.name, style = MaterialTheme.typography.titleMedium,
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(if (file.isDirectory) "Pasta" else sizeText(file.length()),
+                                        color = Color(0xFF68777B))
+                                }
+                                IconButton(onClick = { menuFile = file }) {
+                                    Icon(Icons.Default.MoreVert, "Mais opções")
+                                }
+                                Icon(Icons.Default.ChevronRight, null, tint = Color.Gray)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    menuFile?.let { file ->
+        AlertDialog(onDismissRequest = { menuFile = null }, title = { Text(file.name) },
+            text = { Text(if (file.isDirectory) "Pasta" else sizeText(file.length())) },
+            confirmButton = { TextButton(onClick = {
+                if (file.isFile) shareFile(context, file)
+                else Toast.makeText(context, "Selecione um arquivo para compartilhar.", Toast.LENGTH_SHORT).show()
+                menuFile = null
+            }) { Text("Compartilhar") } },
+            dismissButton = { TextButton(onClick = { menuFile = null }) { Text("Fechar") } })
+    }
 }
 
-private fun openFile(context: android.content.Context, file: DocumentFile) {
+private fun hasAccess() = Build.VERSION.SDK_INT < 30 || Environment.isExternalStorageManager()
+
+private fun iconFor(file: File) = when (file.extension.lowercase()) {
+    "jpg", "jpeg", "png", "gif", "webp", "bmp" -> Icons.Default.Image
+    "mp4", "mkv", "avi", "mov" -> Icons.Default.VideoFile
+    "mp3", "wav", "m4a", "ogg" -> Icons.Default.AudioFile
+    "pdf" -> Icons.Default.PictureAsPdf
+    else -> Icons.Default.InsertDriveFile
+}
+
+private fun sizeText(bytes: Long): String = when {
+    bytes < 1024 -> "$bytes B"
+    bytes < 1024 * 1024 -> String.format(Locale.getDefault(), "%.1f KB", bytes / 1024.0)
+    bytes < 1024L * 1024L * 1024L -> String.format(Locale.getDefault(), "%.1f MB", bytes / (1024.0 * 1024.0))
+    else -> String.format(Locale.getDefault(), "%.2f GB", bytes / (1024.0 * 1024.0 * 1024.0))
+}
+
+private fun mime(file: File) = when (file.extension.lowercase()) {
+    "jpg", "jpeg" -> "image/jpeg"
+    "png" -> "image/png"
+    "gif" -> "image/gif"
+    "webp" -> "image/webp"
+    "pdf" -> "application/pdf"
+    "txt" -> "text/plain"
+    "mp4" -> "video/mp4"
+    "mp3" -> "audio/mpeg"
+    else -> "*/*"
+}
+
+private fun openFile(context: android.content.Context, file: File) {
     try {
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(file.uri, file.type ?: "*/*")
+        val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
+        context.startActivity(Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mime(file)); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        })
+    } catch (_: Exception) {
+        Toast.makeText(context, "Não foi possível abrir este arquivo.", Toast.LENGTH_LONG).show()
+    }
+}
+
+private fun shareFile(context: android.content.Context, file: File) {
+    try {
+        val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = mime(file); putExtra(Intent.EXTRA_STREAM, uri)
+            clipData = android.content.ClipData.newUri(context.contentResolver, file.name, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(intent)
+        context.startActivity(Intent.createChooser(send, "Compartilhar arquivo"))
     } catch (_: Exception) {
-        Toast.makeText(context, "Não há aplicativo compatível para abrir este arquivo.", Toast.LENGTH_LONG).show()
-    }
-}
-
-private fun formatSize(bytes: Long): String {
-    if (bytes < 1024) return bytes.toString() + " B"
-    val kb = bytes / 1024.0
-    if (kb < 1024) return String.format(Locale.getDefault(), "%.1f KB", kb)
-    val mb = kb / 1024.0
-    if (mb < 1024) return String.format(Locale.getDefault(), "%.1f MB", mb)
-    return String.format(Locale.getDefault(), "%.2f GB", mb / 1024.0)
-}
-
-@Composable
-private fun PlaceholderContent(padding: PaddingValues, title: String, description: String) {
-    Column(
-        Modifier.fillMaxSize().padding(padding).padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text(title, style = MaterialTheme.typography.headlineMedium)
-        Spacer(Modifier.height(12.dp))
-        Text(description, style = MaterialTheme.typography.bodyMedium)
+        Toast.makeText(context, "Não foi possível compartilhar este arquivo.", Toast.LENGTH_LONG).show()
     }
 }
