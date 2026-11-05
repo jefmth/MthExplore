@@ -36,7 +36,29 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun MthFileManagerApp() {
-    val colors = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()
+    val colors = if (isSystemInDarkTheme()) {
+        darkColorScheme(
+            primary = androidx.compose.ui.graphics.Color(0xFF008F83),
+            secondary = androidx.compose.ui.graphics.Color(0xFF008F83),
+            background = androidx.compose.ui.graphics.Color(0xFF101817),
+            surface = androidx.compose.ui.graphics.Color(0xFF17211F),
+            primaryContainer = androidx.compose.ui.graphics.Color(0xFFBDECE5),
+            onPrimaryContainer = androidx.compose.ui.graphics.Color(0xFF003731),
+            surfaceVariant = androidx.compose.ui.graphics.Color(0xFFEAF2F0),
+            onSurfaceVariant = androidx.compose.ui.graphics.Color(0xFF52615E)
+        )
+    } else {
+        lightColorScheme(
+            primary = androidx.compose.ui.graphics.Color(0xFF008F83),
+            secondary = androidx.compose.ui.graphics.Color(0xFF008F83),
+            background = androidx.compose.ui.graphics.Color(0xFFF3F7F6),
+            surface = androidx.compose.ui.graphics.Color(0xFFFFFFFF),
+            primaryContainer = androidx.compose.ui.graphics.Color(0xFFDDF3EF),
+            onPrimaryContainer = androidx.compose.ui.graphics.Color(0xFF123B37),
+            surfaceVariant = androidx.compose.ui.graphics.Color(0xFFFFFFFF),
+            onSurfaceVariant = androidx.compose.ui.graphics.Color(0xFF68777B)
+        )
+    }
     MaterialTheme(colorScheme = colors) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             FileManagerHome()
@@ -71,6 +93,12 @@ private fun FileManagerHome() {
         if (rootFolder != null) currentFolder = rootFolder
     }
 
+    // Na primeira abertura, apresenta automaticamente o seletor oficial do Android.
+    // O usuário escolhe o armazenamento uma única vez; a autorização fica salva.
+    LaunchedEffect(Unit) {
+        if (treeUriText == null) folderPicker.launch(null)
+    }
+
     val folderPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
@@ -100,7 +128,7 @@ private fun FileManagerHome() {
             TopAppBar(
                 title = {
                     Column {
-                        Text("MTH File Manager", style = MaterialTheme.typography.titleLarge)
+                        Text("MthExplore", style = MaterialTheme.typography.headlineMedium)
                         Text(
                             if (selectedTab == 1) currentFolder?.name ?: "Arquivos" else "Gerenciador de arquivos",
                             style = MaterialTheme.typography.labelMedium,
@@ -270,21 +298,21 @@ private fun HomeContent(
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(Icons.Default.Storage, contentDescription = null,
                     tint = MaterialTheme.colorScheme.onPrimaryContainer)
-                Text("Armazenamento", style = MaterialTheme.typography.titleMedium,
+                Text("Seus arquivos", style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onPrimaryContainer)
                 Text(
-                    if (hasStorage) "Uma pasta do dispositivo está autorizada."
-                    else "Selecione uma pasta do armazenamento interno ou cartão SD.",
+                    if (hasStorage) "Armazenamento conectado. Explore suas pastas e arquivos."
+                    else "Escolha o armazenamento interno ou cartão SD para começar a explorar.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
                 OutlinedButton(onClick = onChooseStorage) {
-                    Text(if (hasStorage) "Selecionar outra pasta" else "Selecionar armazenamento")
+                    Text(if (hasStorage) "Adicionar outro local" else "Explorar armazenamento")
                 }
                 if (hasStorage) TextButton(onClick = onOpenFiles) { Text("Abrir arquivos") }
             }
         }
-        Text("Categorias", style = MaterialTheme.typography.titleLarge)
+        Text("Explorar por categoria", style = MaterialTheme.typography.titleLarge)
         androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
             columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(2),
             modifier = Modifier.weight(1f),
