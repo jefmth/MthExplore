@@ -367,6 +367,7 @@ private fun FileBrowserContent(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun FileRow(file: DocumentFile, onClick: () -> Unit, onMenu: () -> Unit) {
     val icon = if (file.isDirectory) Icons.Default.Folder else Icons.Default.InsertDriveFile
