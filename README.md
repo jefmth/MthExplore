@@ -8,6 +8,7 @@ Aplicativo Android de gerenciamento de arquivos, desenvolvido em Kotlin com Jetp
 - Android Gradle Plugin 8.7.3
 - Gradle 8.9
 - JDK 17
+- AndroidX DocumentFile / Storage Access Framework
 
 ## Requisitos
 - Android Studio atualizado
@@ -22,10 +23,24 @@ Aplicativo Android de gerenciamento de arquivos, desenvolvido em Kotlin com Jetp
 
 Se o Android Studio solicitar um Gradle Wrapper, gere-o na pasta raiz com `gradle wrapper --gradle-version 8.9` (com Gradle instalado) e sincronize novamente.
 
-## Estado da primeira entrega
-Esta versão contém a configuração Android e a tela inicial do aplicativo. As operações reais de arquivos, permissões de armazenamento, cartão SD, ZIP, lixeira e análise serão implementadas nas próximas etapas.
+## Funcionalidades já implementadas
+- Tela inicial Material 3.
+- Tema claro/escuro seguindo a configuração do sistema.
+- Seleção de uma pasta de armazenamento pelo seletor oficial do Android.
+- Persistência da autorização de acesso concedida pelo usuário.
+- Navegação por pastas e subpastas dentro da pasta autorizada.
+- Listagem de arquivos e pastas, com pastas primeiro.
+- Abertura de arquivos em aplicativos compatíveis.
+- Criação de pastas.
+- Renomeação e exclusão de itens com confirmação para exclusão.
+- Suporte ao cartão SD quando o Android disponibilizar a unidade no seletor.
+
+## Limitações e próximas etapas
+O Android restringe o acesso a determinadas áreas, como diretórios privados de outros aplicativos e partes de `Android/data` e `Android/obb`. O aplicativo só acessa a árvore de pastas que o usuário autorizar.
+
+Ainda serão implementados: copiar, mover, pesquisa, favoritos, recentes, categorias com conteúdo real, lixeira, compactação ZIP, análise de armazenamento e visualizadores internos.
 
 ## Identidade
 - Nome comercial: MTH File Manager
 - Pacote: `com.mth.filemanager`
-- Tema claro/escuro seguindo a configuração do sistema.
+- Repositório: [jefmth/MthExplore](https://github.com/jefmth/MthExplore)
