@@ -1,54 +1,30 @@
 package com.mth.filemanager
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.InsertDriveFile
-import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.VideoLibrary
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
+import androidx.documentfile.provider.DocumentFile
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -61,22 +37,56 @@ class MainActivity : ComponentActivity() {
 private fun MthFileManagerApp() {
     val colors = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()
     MaterialTheme(colorScheme = colors) {
-        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             FileManagerHome()
         }
     }
 }
 
-private data class Category(
-    val title: String,
-    val subtitle: String,
-    val icon: ImageVector
-)
+private data class Category(val title: String, val subtitle: String, val icon: ImageVector)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun FileManagerHome() {
+    val context = LocalContext.current
+    val preferences = remember {
+        context.getSharedPreferences("mth_file_manager", ComponentActivity.MODE_PRIVATE)
+    }
     var selectedTab by remember { mutableIntStateOf(0) }
+    var treeUriText by remember { mutableStateOf(preferences.getString("tree_uri", null)) }
+    var currentFolder by remember { mutableStateOf<DocumentFile?>(null) }
+    var refreshKey by remember { mutableIntStateOf(0) }
+    var showCreateFolder by remember { mutableStateOf(false) }
+    var newFolderName by remember { mutableStateOf("") }
+    var selectedItem by remember { mutableStateOf<DocumentFile?>(null) }
+    var renameValue by remember { mutableStateOf("") }
+    var showDeleteConfirmation by remember { mutableStateOf(false) }
+
+    val rootFolder = remember(treeUriText) {
+        treeUriText?.let { DocumentFile.fromTreeUri(context, Uri.parse(it)) }
+    }
+
+    LaunchedEffect(treeUriText) {
+        if (rootFolder != null) currentFolder = rootFolder
+    }
+
+    val folderPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(uri, flags)
+                preferences.edit().putString("tree_uri", uri.toString()).apply()
+                treeUriText = uri.toString()
+                currentFolder = DocumentFile.fromTreeUri(context, uri)
+                selectedTab = 1
+            } catch (_: Exception) {
+                Toast.makeText(context, "Não foi possível autorizar esta pasta.", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     val categories = listOf(
         Category("Imagens", "Fotos e imagens", Icons.Default.Image),
         Category("Vídeos", "Vídeos do dispositivo", Icons.Default.VideoLibrary),
@@ -90,56 +100,164 @@ private fun FileManagerHome() {
                 title = {
                     Column {
                         Text("MTH File Manager", style = MaterialTheme.typography.titleLarge)
-                        Text("Gerenciador de arquivos", style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            if (selectedTab == 1) currentFolder?.name ?: "Arquivos" else "Gerenciador de arquivos",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
+                navigationIcon = {
+                    if (selectedTab == 1 && currentFolder != null && rootFolder != null &&
+                        currentFolder?.uri != rootFolder.uri
+                    ) {
+                        IconButton(onClick = {
+                            currentFolder = currentFolder?.parentFile ?: rootFolder
+                            refreshKey++
+                        }) {
+                            Icon(Icons.Default.ArrowBack, contentDescription = "Voltar")
+                        }
                     }
                 },
                 actions = {
-                    androidx.compose.material3.IconButton(onClick = { }) {
-                        Icon(Icons.Default.Search, contentDescription = "Pesquisar")
+                    if (selectedTab == 1 && currentFolder != null) {
+                        IconButton(onClick = { showCreateFolder = true }) {
+                            Icon(Icons.Default.CreateNewFolder, contentDescription = "Criar pasta")
+                        }
                     }
-                    androidx.compose.material3.IconButton(onClick = { selectedTab = 2 }) {
+                    IconButton(onClick = { selectedTab = 2 }) {
                         Icon(Icons.Default.Settings, contentDescription = "Configurações")
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+                }
             )
         },
         bottomBar = {
             NavigationBar {
-                NavigationBarItem(
-                    selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
-                    icon = { Icon(Icons.Default.Home, contentDescription = null) },
-                    label = { Text("Início") }
-                )
-                NavigationBarItem(
-                    selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
-                    icon = { Icon(Icons.Default.Folder, contentDescription = null) },
-                    label = { Text("Arquivos") }
-                )
-                NavigationBarItem(
-                    selected = selectedTab == 2,
-                    onClick = { selectedTab = 2 },
-                    icon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                    label = { Text("Ajustes") }
-                )
+                NavigationBarItem(selectedTab == 0, { selectedTab = 0 },
+                    icon = { Icon(Icons.Default.Home, null) }, label = { Text("Início") })
+                NavigationBarItem(selectedTab == 1, { selectedTab = 1 },
+                    icon = { Icon(Icons.Default.Folder, null) }, label = { Text("Arquivos") })
+                NavigationBarItem(selectedTab == 2, { selectedTab = 2 },
+                    icon = { Icon(Icons.Default.Settings, null) }, label = { Text("Ajustes") })
             }
         }
     ) { padding ->
         when (selectedTab) {
-            0 -> HomeContent(padding, categories)
-            1 -> PlaceholderContent(padding, "Arquivos", "A navegação pelo armazenamento será implementada na próxima etapa.")
-            else -> PlaceholderContent(padding, "Configurações", "Preferências, tema e ferramentas do aplicativo.")
+            0 -> HomeContent(
+                padding, categories, rootFolder != null,
+                { folderPicker.launch(null) }, { selectedTab = 1 }
+            )
+            1 -> FileBrowserContent(
+                padding, currentFolder, refreshKey,
+                { folderPicker.launch(null) },
+                { currentFolder = it },
+                { openFile(context, it) },
+                {
+                    selectedItem = it
+                    renameValue = it.name ?: ""
+                }
+            )
+            else -> PlaceholderContent(
+                padding, "Configurações",
+                "O tema claro ou escuro acompanha a configuração do Android."
+            )
         }
+    }
+
+    if (showCreateFolder) {
+        AlertDialog(
+            onDismissRequest = { showCreateFolder = false },
+            title = { Text("Nova pasta") },
+            text = {
+                OutlinedTextField(
+                    value = newFolderName,
+                    onValueChange = { newFolderName = it },
+                    label = { Text("Nome da pasta") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val name = newFolderName.trim()
+                    if (name.isNotEmpty()) {
+                        val created = currentFolder?.createDirectory(name)
+                        Toast.makeText(
+                            context,
+                            if (created != null) "Pasta criada." else "Não foi possível criar a pasta.",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        refreshKey++
+                    }
+                    newFolderName = ""
+                    showCreateFolder = false
+                }) { Text("Criar") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCreateFolder = false }) { Text("Cancelar") }
+            }
+        )
+    }
+
+    selectedItem?.let { item ->
+        AlertDialog(
+            onDismissRequest = { selectedItem = null },
+            title = { Text(item.name ?: "Item selecionado") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = renameValue,
+                        onValueChange = { renameValue = it },
+                        label = { Text("Novo nome") },
+                        singleLine = true
+                    )
+                    TextButton(onClick = {
+                        val ok = renameValue.trim().isNotEmpty() && item.renameTo(renameValue.trim())
+                        Toast.makeText(context, if (ok) "Item renomeado." else "Não foi possível renomear.", Toast.LENGTH_SHORT).show()
+                        selectedItem = null
+                        refreshKey++
+                    }) { Text("Renomear") }
+                    TextButton(onClick = { showDeleteConfirmation = true }) {
+                        Text("Excluir", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { selectedItem = null }) { Text("Fechar") }
+            }
+        )
+    }
+
+    if (showDeleteConfirmation && selectedItem != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmation = false },
+            title = { Text("Excluir item?") },
+            text = { Text("O item será removido do armazenamento selecionado. Esta ação não poderá ser desfeita pelo aplicativo.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val deleted = selectedItem?.delete() == true
+                    Toast.makeText(context, if (deleted) "Item excluído." else "Não foi possível excluir.", Toast.LENGTH_SHORT).show()
+                    showDeleteConfirmation = false
+                    selectedItem = null
+                    refreshKey++
+                }) { Text("Excluir", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmation = false }) { Text("Cancelar") }
+            }
+        )
     }
 }
 
 @Composable
-private fun HomeContent(padding: PaddingValues, categories: List<Category>) {
+private fun HomeContent(
+    padding: PaddingValues,
+    categories: List<Category>,
+    hasStorage: Boolean,
+    onChooseStorage: () -> Unit,
+    onOpenFiles: () -> Unit
+) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 18.dp),
+        Modifier.fillMaxSize().padding(padding).padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
         Spacer(Modifier.height(2.dp))
@@ -149,37 +267,39 @@ private fun HomeContent(padding: PaddingValues, categories: List<Category>) {
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
         ) {
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.Storage, contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer)
                 Text("Armazenamento", style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onPrimaryContainer)
-                Text("Visão geral do espaço do dispositivo", style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer)
-                Text("Leitura do armazenamento será ativada na próxima etapa.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Text(
+                    if (hasStorage) "Uma pasta do dispositivo está autorizada."
+                    else "Selecione uma pasta do armazenamento interno ou cartão SD.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                OutlinedButton(onClick = onChooseStorage) {
+                    Text(if (hasStorage) "Selecionar outra pasta" else "Selecionar armazenamento")
+                }
+                if (hasStorage) TextButton(onClick = onOpenFiles) { Text("Abrir arquivos") }
             }
         }
-
         Text("Categorias", style = MaterialTheme.typography.titleLarge)
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
+        androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+            columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(2),
             modifier = Modifier.weight(1f),
             contentPadding = PaddingValues(bottom = 18.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(categories) { category ->
+            items(categories.size) { index ->
+                val category = categories[index]
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(18.dp),
-                    onClick = { },
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                 ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(category.icon, contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary)
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Icon(category.icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         Text(category.title, style = MaterialTheme.typography.titleMedium)
                         Text(category.subtitle, style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -191,9 +311,105 @@ private fun HomeContent(padding: PaddingValues, categories: List<Category>) {
 }
 
 @Composable
+private fun FileBrowserContent(
+    padding: PaddingValues,
+    folder: DocumentFile?,
+    refreshKey: Int,
+    onChooseStorage: () -> Unit,
+    onOpenFolder: (DocumentFile) -> Unit,
+    onOpenFile: (DocumentFile) -> Unit,
+    onItemMenu: (DocumentFile) -> Unit
+) {
+    val files = remember(folder?.uri, refreshKey) {
+        folder?.listFiles()?.sortedWith(
+            compareBy<DocumentFile> { !it.isDirectory }
+                .thenBy { it.name?.lowercase(Locale.getDefault()) ?: "" }
+        ) ?: emptyList()
+    }
+
+    if (folder == null) {
+        Column(
+            Modifier.fillMaxSize().padding(padding).padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(Icons.Default.Storage, contentDescription = null)
+            Spacer(Modifier.height(12.dp))
+            Text("Nenhum armazenamento selecionado", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            Text("Escolha uma pasta do armazenamento interno ou do cartão SD.")
+            Spacer(Modifier.height(16.dp))
+            OutlinedButton(onClick = onChooseStorage) { Text("Selecionar pasta") }
+        }
+    } else if (files.isEmpty()) {
+        Column(
+            Modifier.fillMaxSize().padding(padding).padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(Icons.Default.Folder, contentDescription = null)
+            Spacer(Modifier.height(8.dp))
+            Text("Esta pasta está vazia", style = MaterialTheme.typography.titleMedium)
+        }
+    } else {
+        LazyColumn(
+            Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            items(files, key = { it.uri.toString() }) { file ->
+                FileRow(
+                    file,
+                    onClick = { if (file.isDirectory) onOpenFolder(file) else onOpenFile(file) },
+                    onMenu = { onItemMenu(file) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FileRow(file: DocumentFile, onClick: () -> Unit, onMenu: () -> Unit) {
+    val icon = if (file.isDirectory) Icons.Default.Folder else Icons.Default.InsertDriveFile
+    val detail = if (file.isDirectory) "Pasta" else formatSize(file.length()) + " • " + (file.type ?: "Arquivo")
+
+    ListItem(
+        headlineContent = { Text(file.name ?: "Sem nome", maxLines = 1) },
+        supportingContent = { Text(detail, maxLines = 1) },
+        leadingContent = { Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+        trailingContent = {
+            IconButton(onClick = onMenu) {
+                Icon(Icons.Default.MoreVert, contentDescription = "Mais opções")
+            }
+        },
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
+    )
+}
+
+private fun openFile(context: android.content.Context, file: DocumentFile) {
+    try {
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(file.uri, file.type ?: "*/*")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(intent)
+    } catch (_: Exception) {
+        Toast.makeText(context, "Não há aplicativo compatível para abrir este arquivo.", Toast.LENGTH_LONG).show()
+    }
+}
+
+private fun formatSize(bytes: Long): String {
+    if (bytes < 1024) return bytes.toString() + " B"
+    val kb = bytes / 1024.0
+    if (kb < 1024) return String.format(Locale.getDefault(), "%.1f KB", kb)
+    val mb = kb / 1024.0
+    if (mb < 1024) return String.format(Locale.getDefault(), "%.1f MB", mb)
+    return String.format(Locale.getDefault(), "%.2f GB", mb / 1024.0)
+}
+
+@Composable
 private fun PlaceholderContent(padding: PaddingValues, title: String, description: String) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
+        Modifier.fillMaxSize().padding(padding).padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
