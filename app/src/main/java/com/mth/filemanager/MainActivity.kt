@@ -241,23 +241,18 @@ private fun ExplorerScreen() {
                     }
                     Text("Resultados da pesquisa", style = MaterialTheme.typography.titleMedium,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Row(
+                    if (selectionMode) Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (selectionMode) {
-                            Text("${selectedFiles.size} selecionados", modifier = Modifier.weight(1f),
-                                color = Color(0xFF68777B))
-                            TextButton(onClick = {
-                                selectionMode = false
-                                selectedFiles = emptySet()
-                            }) { Text("Cancelar") }
-                            IconButton(onClick = requestDeleteSelected, enabled = selectedFiles.isNotEmpty()) {
-                                Icon(Icons.Default.Delete, "Excluir selecionados", tint = MaterialTheme.colorScheme.error)
-                            }
-                        } else {
-                            Spacer(Modifier.weight(1f))
-                            TextButton(onClick = { selectionMode = true }) { Text("Selecionar") }
+                        Text("${selectedFiles.size} selecionados", modifier = Modifier.weight(1f),
+                            color = Color(0xFF68777B))
+                        TextButton(onClick = {
+                            selectionMode = false
+                            selectedFiles = emptySet()
+                        }) { Text("Cancelar") }
+                        IconButton(onClick = requestDeleteSelected, enabled = selectedFiles.isNotEmpty()) {
+                            Icon(Icons.Default.Delete, "Excluir selecionados", tint = MaterialTheme.colorScheme.error)
                         }
                     }
                     when {
@@ -280,6 +275,9 @@ private fun ExplorerScreen() {
                                 Card(
                                     Modifier.fillMaxWidth().combinedClickable(
                                         onClick = { openFile(context, file) },
+                                        onDoubleClick = {
+                                            if (file.isFile) toggleSelectedFile(file)
+                                        },
                                         onLongClick = {
                                             if (file.isFile) toggleSelectedFile(file)
                                         }
@@ -344,23 +342,18 @@ private fun ExplorerScreen() {
                             Icon(Icons.Default.ArrowUpward, "Pasta anterior")
                         }
                 }
-                Row(
+                if (selectionMode) Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (selectionMode) {
-                        Text("${selectedFiles.size} selecionados", modifier = Modifier.weight(1f),
-                            color = Color(0xFF68777B))
-                        TextButton(onClick = {
-                            selectionMode = false
-                            selectedFiles = emptySet()
-                        }) { Text("Cancelar") }
-                        IconButton(onClick = requestDeleteSelected, enabled = selectedFiles.isNotEmpty()) {
-                            Icon(Icons.Default.Delete, "Excluir selecionados", tint = MaterialTheme.colorScheme.error)
-                        }
-                    } else {
-                        Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { selectionMode = true }) { Text("Selecionar") }
+                    Text("${selectedFiles.size} selecionados", modifier = Modifier.weight(1f),
+                        color = Color(0xFF68777B))
+                    TextButton(onClick = {
+                        selectionMode = false
+                        selectedFiles = emptySet()
+                    }) { Text("Cancelar") }
+                    IconButton(onClick = requestDeleteSelected, enabled = selectedFiles.isNotEmpty()) {
+                        Icon(Icons.Default.Delete, "Excluir selecionados", tint = MaterialTheme.colorScheme.error)
                     }
                 }
                 FlowRow(
@@ -391,6 +384,9 @@ private fun ExplorerScreen() {
                             onClick = {
                                 if (file.isDirectory) { folder = file; tab = 1; search = ""; extensionFilter = "Tudo"; refresh++ }
                                 else openFile(context, file)
+                            },
+                            onDoubleClick = {
+                                if (file.isFile) toggleSelectedFile(file)
                             },
                             onLongClick = {
                                 if (file.isFile) toggleSelectedFile(file)
