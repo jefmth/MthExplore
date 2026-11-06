@@ -98,7 +98,7 @@ private fun ExplorerScreen() {
         folder.parentFile?.let { folder = it; refresh++ }
     }
 
-    val files = remember(folder.absolutePath, refresh, search, allowed) {
+    val files = remember(folder.absolutePath, refresh, search, allowed, showHidden, extensionFilter) {
         if (!allowed) emptyList() else folder.listFiles()
             ?.filter { showHidden || !it.name.startsWith(".") }
             ?.filter { it.name.contains(search, ignoreCase = true) || it.extension.contains(search.removePrefix("."), ignoreCase = true) }
