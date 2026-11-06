@@ -85,6 +85,7 @@ private fun ExplorerScreen() {
     var searching by remember { mutableStateOf(false) }
     var tab by remember { mutableIntStateOf(0) }
     var menuFile by remember { mutableStateOf<File?>(null) }
+    var deleteFile by remember { mutableStateOf<File?>(null) }
     var showHidden by remember { mutableStateOf(context.getSharedPreferences("mth_explore", 0).getBoolean("show_hidden", false)) }
     var extensionFilter by remember { mutableStateOf("Tudo") }
 
@@ -297,7 +298,36 @@ private fun ExplorerScreen() {
                 else Toast.makeText(context, "Selecione um arquivo para compartilhar.", Toast.LENGTH_SHORT).show()
                 menuFile = null
             }) { Text("Compartilhar") } },
-            dismissButton = { TextButton(onClick = { menuFile = null }) { Text("Fechar") } })
+            dismissButton = {
+                Row {
+                    if (file.isFile) TextButton(onClick = {
+                        deleteFile = file
+                        menuFile = null
+                    }) { Text("Excluir", color = MaterialTheme.colorScheme.error) }
+                    TextButton(onClick = { menuFile = null }) { Text("Fechar") }
+                }
+            })
+    }
+
+    deleteFile?.let { file ->
+        AlertDialog(
+            onDismissRequest = { deleteFile = null },
+            title = { Text("Excluir arquivo?") },
+            text = { Text("O arquivo \"${file.name}\" será excluído permanentemente.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val deleted = runCatching { file.isFile && file.delete() }.getOrDefault(false)
+                    deleteFile = null
+                    refresh++
+                    Toast.makeText(
+                        context,
+                        if (deleted) "Arquivo excluído." else "Não foi possível excluir o arquivo.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }) { Text("Excluir", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { deleteFile = null }) { Text("Cancelar") } }
+        )
     }
 }
 
