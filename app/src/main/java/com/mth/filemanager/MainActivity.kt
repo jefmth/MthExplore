@@ -9,6 +9,7 @@ import android.os.StatFs
 import android.provider.MediaStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
 import android.graphics.BitmapFactory
 import android.provider.Settings
 import android.widget.Toast
@@ -106,6 +107,8 @@ private fun ExplorerScreen() {
 
     var mediaFiles by remember { mutableStateOf<List<File>>(emptyList()) }
     var mediaLoading by remember { mutableStateOf(false) }
+    var deviceSearchResults by remember { mutableStateOf<List<File>>(emptyList()) }
+    var deviceSearchLoading by remember { mutableStateOf(false) }
     val isMediaCategory = extensionFilter in listOf("Imagens", "Vídeos", "Áudios")
 
     LaunchedEffect(allowed, extensionFilter, refresh, search, showHidden) {
@@ -130,6 +133,20 @@ private fun ExplorerScreen() {
             ?: emptyList()
     }
     val files = if (isMediaCategory) mediaFiles else folderFiles
+
+    LaunchedEffect(tab, searching, search, allowed, refresh, showHidden) {
+        if (tab == 0 && searching && search.isNotBlank() && allowed) {
+            deviceSearchLoading = true
+            delay(250)
+            deviceSearchResults = withContext(Dispatchers.IO) {
+                queryDeviceFiles(context, search, showHidden)
+            }
+            deviceSearchLoading = false
+        } else {
+            deviceSearchResults = emptyList()
+            deviceSearchLoading = false
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -225,6 +242,42 @@ private fun ExplorerScreen() {
                     Icon(Icons.Default.FolderOpen, null)
                     Spacer(Modifier.width(8.dp))
                     Text("Abrir arquivos do dispositivo")
+                }
+                if (searching && search.isNotBlank()) {
+                    Text("Resultados da pesquisa", style = MaterialTheme.typography.titleMedium)
+                    when {
+                        deviceSearchLoading -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
+                        deviceSearchResults.isEmpty() -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                            Text("Nenhum arquivo encontrado para \"$search\".", color = Color.Gray)
+                        }
+                        else -> LazyColumn(
+                            modifier = Modifier.fillMaxWidth().weight(1f),
+                            contentPadding = PaddingValues(bottom = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(deviceSearchResults, key = { it.absolutePath }) { file ->
+                                Card(
+                                    Modifier.fillMaxWidth().clickable { openFile(context, file) },
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color.White)
+                                ) {
+                                    Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(iconFor(file), null, tint = Teal, modifier = Modifier.size(30.dp))
+                                        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                                            Text(file.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                                style = MaterialTheme.typography.titleSmall)
+                                            Text(file.parent ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                                color = Color(0xFF68777B), style = MaterialTheme.typography.bodySmall)
+                                        }
+                                        Text(sizeText(file.length()), color = Color(0xFF68777B),
+                                            style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
             else -> Column(Modifier.fillMaxSize().padding(padding)) {
@@ -349,6 +402,35 @@ private fun StorageInfoCard() {
     }
 }
 
+
+private fun queryDeviceFiles(context: android.content.Context, search: String, showHidden: Boolean): List<File> {
+    val normalized = search.trim().removePrefix(".")
+    if (normalized.isBlank()) return emptyList()
+    val results = mutableListOf<File>()
+    val collection = MediaStore.Files.getContentUri("external")
+    val projection = arrayOf(MediaStore.MediaColumns.DATA)
+    runCatching {
+        context.contentResolver.query(
+            collection,
+            projection,
+            null,
+            null,
+            "${MediaStore.MediaColumns.DISPLAY_NAME} COLLATE NOCASE ASC"
+        )?.use { cursor ->
+            val column = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
+            if (column >= 0) while (cursor.moveToNext() && results.size < 200) {
+                val path = cursor.getString(column) ?: continue
+                val file = File(path)
+                if (file.isFile && (showHidden || !file.name.startsWith(".")) &&
+                    (file.name.contains(search.trim(), ignoreCase = true) ||
+                        file.extension.contains(normalized, ignoreCase = true))) {
+                    results.add(file)
+                }
+            }
+        }
+    }
+    return results
+}
 
 private fun queryMediaFiles(context: android.content.Context, category: String, search: String, showHidden: Boolean): List<File> {
     val collection = when (category) {
