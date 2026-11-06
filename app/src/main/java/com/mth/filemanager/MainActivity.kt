@@ -13,6 +13,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -173,25 +174,38 @@ private fun ExplorerScreen() {
                     })
                 }
             }
-            else -> Column(Modifier.fillMaxSize().padding(padding)) {
+            tab == 0 -> Column(
+                Modifier.fillMaxSize().padding(padding).padding(horizontal = 18.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
                 Card(
-                    Modifier.fillMaxWidth().padding(horizontal = 18.dp),
+                    Modifier.fillMaxWidth().clickable {
+                        tab = 1
+                        folder = Environment.getExternalStorageDirectory()
+                        refresh++
+                    },
                     shape = RoundedCornerShape(20.dp),
                     colors = CardDefaults.cardColors(containerColor = Teal)
                 ) {
-                    Row(Modifier.fillMaxWidth().clickable {
-                        folder = Environment.getExternalStorageDirectory(); tab = 1; refresh++
-                    }.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Storage, null, tint = Color.White, modifier = Modifier.size(38.dp))
                         Column(Modifier.weight(1f).padding(start = 16.dp)) {
                             Text("Armazenamento interno", color = Color.White, style = MaterialTheme.typography.titleLarge)
-                            Text(files.size.toString() + " itens nesta pasta", color = Color.White)
+                            Text("Toque para explorar seus arquivos", color = Color.White)
                         }
                         Icon(Icons.Default.ChevronRight, null, tint = Color.White)
                     }
                 }
                 StorageInfoCard()
-                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 18.dp),
+                Text("Acesso rápido", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 8.dp))
+                Button(onClick = { tab = 1; folder = Environment.getExternalStorageDirectory(); refresh++ }) {
+                    Icon(Icons.Default.FolderOpen, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Abrir arquivos do dispositivo")
+                }
+            }
+            else -> Column(Modifier.fillMaxSize().padding(padding)) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     Text(if (folder.absolutePath == Environment.getExternalStorageDirectory().absolutePath)
                         "Pastas do dispositivo" else folder.name,
@@ -201,10 +215,14 @@ private fun ExplorerScreen() {
                             Icon(Icons.Default.ArrowUpward, "Pasta anterior")
                         }
                 }
-                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState())
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     listOf("Tudo", "Imagens", "Vídeos", "Áudios", "Documentos").forEach { category ->
                         FilterChip(selected = extensionFilter == category, onClick = { extensionFilter = category },
-                            label = { Text(category) })
+                            label = { Text(category, maxLines = 1) })
                     }
                 }
                 if (files.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
