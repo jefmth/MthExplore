@@ -6,6 +6,9 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.os.StatFs
+import android.provider.MediaStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import android.graphics.BitmapFactory
 import android.provider.Settings
 import android.widget.Toast
@@ -13,7 +16,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,6 +24,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -68,7 +72,7 @@ private fun MthExploreApp() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun ExplorerScreen() {
     val context = LocalContext.current
@@ -99,14 +103,32 @@ private fun ExplorerScreen() {
         folder.parentFile?.let { folder = it; refresh++ }
     }
 
-    val files = remember(folder.absolutePath, refresh, search, allowed, showHidden, extensionFilter) {
-        if (!allowed) emptyList() else folder.listFiles()
+    var mediaFiles by remember { mutableStateOf<List<File>>(emptyList()) }
+    var mediaLoading by remember { mutableStateOf(false) }
+    val isMediaCategory = extensionFilter in listOf("Imagens", "Vídeos", "Áudios")
+
+    LaunchedEffect(allowed, extensionFilter, refresh, search, showHidden) {
+        if (allowed && extensionFilter in listOf("Imagens", "Vídeos", "Áudios")) {
+            mediaLoading = true
+            mediaFiles = emptyList()
+            mediaFiles = withContext(Dispatchers.IO) {
+                queryMediaFiles(context, extensionFilter, search, showHidden)
+            }
+            mediaLoading = false
+        } else {
+            mediaLoading = false
+        }
+    }
+
+    val folderFiles = remember(folder.absolutePath, refresh, search, allowed, showHidden, extensionFilter) {
+        if (!allowed || isMediaCategory) emptyList() else folder.listFiles()
             ?.filter { showHidden || !it.name.startsWith(".") }
             ?.filter { it.name.contains(search, ignoreCase = true) || it.extension.contains(search.removePrefix("."), ignoreCase = true) }
             ?.filter { extensionFilter == "Tudo" || (it.isFile && extensionCategory(it) == extensionFilter) }
             ?.sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase(Locale.getDefault()) })
             ?: emptyList()
     }
+    val files = if (isMediaCategory) mediaFiles else folderFiles
 
     Scaffold(
         topBar = {
@@ -125,7 +147,7 @@ private fun ExplorerScreen() {
                 if (searching) OutlinedTextField(
                     value = search, onValueChange = { search = it },
                     modifier = Modifier.fillMaxWidth(), singleLine = true,
-                    placeholder = { Text("Pesquisar nesta pasta") },
+                    placeholder = { Text(if (isMediaCategory) "Pesquisar no dispositivo" else "Pesquisar nesta pasta") },
                     leadingIcon = { Icon(Icons.Default.Search, null) },
                     trailingIcon = { IconButton(onClick = { search = "" }) { Icon(Icons.Default.Close, "Limpar") } }
                 )
@@ -207,7 +229,7 @@ private fun ExplorerScreen() {
             else -> Column(Modifier.fillMaxSize().padding(padding)) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (folder.absolutePath == Environment.getExternalStorageDirectory().absolutePath)
+                    Text(if (isMediaCategory) "$extensionFilter do dispositivo" else if (folder.absolutePath == Environment.getExternalStorageDirectory().absolutePath)
                         "Pastas do dispositivo" else folder.name,
                         Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                     if (folder.absolutePath != Environment.getExternalStorageDirectory().absolutePath)
@@ -215,25 +237,28 @@ private fun ExplorerScreen() {
                             Icon(Icons.Default.ArrowUpward, "Pasta anterior")
                         }
                 }
-                Row(
-                    Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState())
-                        .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     listOf("Tudo", "Imagens", "Vídeos", "Áudios", "Documentos").forEach { category ->
                         FilterChip(selected = extensionFilter == category, onClick = { extensionFilter = category },
                             label = { Text(category, maxLines = 1) })
                     }
                 }
-                if (files.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Nenhum arquivo encontrado nesta pasta.", color = Color.Gray)
+                if (mediaLoading && isMediaCategory) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                } else if (files.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(if (isMediaCategory) "Nenhum arquivo desta categoria foi encontrado no dispositivo."
+                        else "Nenhum arquivo encontrado nesta pasta.", color = Color.Gray)
                 } else LazyColumn(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(files, key = { it.absolutePath }) { file ->
                         Card(Modifier.fillMaxWidth().clickable {
-                            if (file.isDirectory) { folder = file; tab = 1; search = ""; refresh++ }
+                            if (file.isDirectory) { folder = file; tab = 1; search = ""; extensionFilter = "Tudo"; refresh++ }
                             else openFile(context, file)
                         }, shape = RoundedCornerShape(17.dp),
                             colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -292,6 +317,33 @@ private fun StorageInfoCard() {
                 style = MaterialTheme.typography.bodySmall, color = Color(0xFF68777B))
         }
     }
+}
+
+
+private fun queryMediaFiles(context: android.content.Context, category: String, search: String, showHidden: Boolean): List<File> {
+    val collection = when (category) {
+        "Imagens" -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        "Vídeos" -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        "Áudios" -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+        else -> return emptyList()
+    }
+    val result = mutableListOf<File>()
+    val projection = arrayOf(MediaStore.MediaColumns.DATA)
+    runCatching {
+        context.contentResolver.query(collection, projection, null, null, "${MediaStore.MediaColumns.DISPLAY_NAME} COLLATE NOCASE ASC")?.use { cursor ->
+            val column = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
+            if (column >= 0) while (cursor.moveToNext()) {
+                val path = cursor.getString(column) ?: continue
+                val file = File(path)
+                if (file.isFile && (showHidden || !file.name.startsWith(".")) &&
+                    (search.isBlank() || file.name.contains(search, ignoreCase = true) ||
+                        file.extension.contains(search.removePrefix("."), ignoreCase = true))) {
+                    result.add(file)
+                }
+            }
+        }
+    }
+    return result
 }
 
 private fun extensionCategory(file: File): String = when (file.extension.lowercase()) {
