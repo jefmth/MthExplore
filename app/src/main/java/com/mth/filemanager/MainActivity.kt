@@ -5,6 +5,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.StatFs
+import android.graphics.BitmapFactory
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -22,6 +24,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -75,6 +80,8 @@ private fun ExplorerScreen() {
     var searching by remember { mutableStateOf(false) }
     var tab by remember { mutableIntStateOf(0) }
     var menuFile by remember { mutableStateOf<File?>(null) }
+    var showHidden by remember { mutableStateOf(context.getSharedPreferences("mth_explore", 0).getBoolean("show_hidden", false)) }
+    var extensionFilter by remember { mutableStateOf("Tudo") }
 
     DisposableEffect(owner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -93,7 +100,9 @@ private fun ExplorerScreen() {
 
     val files = remember(folder.absolutePath, refresh, search, allowed) {
         if (!allowed) emptyList() else folder.listFiles()
-            ?.filter { it.name.contains(search, ignoreCase = true) }
+            ?.filter { showHidden || !it.name.startsWith(".") }
+            ?.filter { it.name.contains(search, ignoreCase = true) || it.extension.contains(search.removePrefix("."), ignoreCase = true) }
+            ?.filter { extensionFilter == "Tudo" || (it.isFile && extensionCategory(it) == extensionFilter) }
             ?.sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase(Locale.getDefault()) })
             ?: emptyList()
     }
@@ -149,9 +158,20 @@ private fun ExplorerScreen() {
                     catch (_: Exception) { activity.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)) }
                 }) { Text("Autorizar acesso aos arquivos") }
             }
-            tab == 2 -> Column(Modifier.fillMaxSize().padding(padding).padding(24.dp)) {
+            tab == 2 -> Column(Modifier.fillMaxSize().padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text("Ajustes", style = MaterialTheme.typography.headlineSmall)
                 Text("Acesso aos arquivos do dispositivo autorizado pelo Android.")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Mostrar arquivos ocultos", style = MaterialTheme.typography.titleMedium)
+                        Text("Exibe arquivos e pastas cujo nome começa com ponto.", color = Color.Gray)
+                    }
+                    Switch(checked = showHidden, onCheckedChange = {
+                        showHidden = it
+                        context.getSharedPreferences("mth_explore", 0).edit().putBoolean("show_hidden", it).apply()
+                        refresh++
+                    })
+                }
             }
             else -> Column(Modifier.fillMaxSize().padding(padding)) {
                 Card(
@@ -170,6 +190,7 @@ private fun ExplorerScreen() {
                         Icon(Icons.Default.ChevronRight, null, tint = Color.White)
                     }
                 }
+                StorageInfoCard()
                 Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 18.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     Text(if (folder.absolutePath == Environment.getExternalStorageDirectory().absolutePath)
@@ -179,6 +200,12 @@ private fun ExplorerScreen() {
                         IconButton(onClick = { folder.parentFile?.let { folder = it }; refresh++ }) {
                             Icon(Icons.Default.ArrowUpward, "Pasta anterior")
                         }
+                }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("Tudo", "Imagens", "Vídeos", "Áudios", "Documentos").forEach { category ->
+                        FilterChip(selected = extensionFilter == category, onClick = { extensionFilter = category },
+                            label = { Text(category) })
+                    }
                 }
                 if (files.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("Nenhum arquivo encontrado nesta pasta.", color = Color.Gray)
@@ -195,8 +222,12 @@ private fun ExplorerScreen() {
                             elevation = CardDefaults.cardElevation(1.dp)) {
                             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically) {
-                                Icon(if (file.isDirectory) Icons.Default.Folder else iconFor(file),
-                                    null, tint = Teal, modifier = Modifier.size(34.dp))
+                                if (!file.isDirectory && isImageFile(file)) {
+                                    ImageThumbnail(file)
+                                } else {
+                                    Icon(if (file.isDirectory) Icons.Default.Folder else iconFor(file),
+                                        null, tint = Teal, modifier = Modifier.size(34.dp))
+                                }
                                 Column(Modifier.weight(1f).padding(start = 16.dp)) {
                                     Text(file.name, style = MaterialTheme.typography.titleMedium,
                                         maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -224,6 +255,49 @@ private fun ExplorerScreen() {
                 menuFile = null
             }) { Text("Compartilhar") } },
             dismissButton = { TextButton(onClick = { menuFile = null }) { Text("Fechar") } })
+    }
+}
+
+@Composable
+private fun StorageInfoCard() {
+    val stat = remember { StatFs(Environment.getExternalStorageDirectory().absolutePath) }
+    val total = stat.totalBytes
+    val free = stat.availableBytes
+    val used = (total - free).coerceAtLeast(0L)
+    Card(Modifier.fillMaxWidth().padding(horizontal = 18.dp), colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(16.dp)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Armazenamento", style = MaterialTheme.typography.titleMedium)
+            LinearProgressIndicator(progress = { if (total > 0) used.toFloat() / total else 0f },
+                modifier = Modifier.fillMaxWidth(), color = Teal)
+            Text("Usado: " + sizeText(used) + " • Livre: " + sizeText(free) + " • Total: " + sizeText(total),
+                style = MaterialTheme.typography.bodySmall, color = Color(0xFF68777B))
+        }
+    }
+}
+
+private fun extensionCategory(file: File): String = when (file.extension.lowercase()) {
+    "jpg", "jpeg", "png", "gif", "webp", "bmp", "heic" -> "Imagens"
+    "mp4", "mkv", "avi", "mov", "3gp" -> "Vídeos"
+    "mp3", "wav", "m4a", "ogg", "aac", "flac" -> "Áudios"
+    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "rtf", "csv" -> "Documentos"
+    else -> "Outros"
+}
+
+private fun isImageFile(file: File) = extensionCategory(file) == "Imagens"
+
+@Composable
+private fun ImageThumbnail(file: File) {
+    val bitmap = remember(file.absolutePath, file.lastModified()) {
+        runCatching {
+            val options = BitmapFactory.Options().apply { inSampleSize = 8 }
+            BitmapFactory.decodeFile(file.absolutePath, options)?.asImageBitmap()
+        }.getOrNull()
+    }
+    if (bitmap != null) {
+        Image(bitmap, contentDescription = file.name, modifier = Modifier.size(42.dp), contentScale = ContentScale.Crop)
+    } else {
+        Icon(Icons.Default.Image, null, tint = Teal, modifier = Modifier.size(34.dp))
     }
 }
 
