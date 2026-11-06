@@ -17,6 +17,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -74,7 +76,7 @@ private fun MthExploreApp() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 private fun ExplorerScreen() {
     val context = LocalContext.current
@@ -137,7 +139,9 @@ private fun ExplorerScreen() {
     }
     val files = if (isMediaCategory) mediaFiles else folderFiles
     val toggleSelectedFile: (File) -> Unit = { file ->
-        selectedFiles = if (file in selectedFiles) selectedFiles - file else selectedFiles + file
+        val updated = if (file in selectedFiles) selectedFiles - file else selectedFiles + file
+        selectedFiles = updated
+        selectionMode = updated.isNotEmpty()
     }
     val requestDeleteSelected = {
         deleteFiles = selectedFiles.toList()
@@ -235,20 +239,25 @@ private fun ExplorerScreen() {
                         Spacer(Modifier.width(8.dp))
                         Text("Abrir arquivos do dispositivo")
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Resultados da pesquisa", style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.weight(1f))
+                    Text("Resultados da pesquisa", style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         if (selectionMode) {
-                            Text("${selectedFiles.size} selecionados", color = Color(0xFF68777B))
-                        }
-                        TextButton(onClick = {
-                            selectionMode = !selectionMode
-                            if (!selectionMode) selectedFiles = emptySet()
-                        }) { Text(if (selectionMode) "Cancelar" else "Selecionar") }
-                        if (selectionMode) {
+                            Text("${selectedFiles.size} selecionados", modifier = Modifier.weight(1f),
+                                color = Color(0xFF68777B))
+                            TextButton(onClick = {
+                                selectionMode = false
+                                selectedFiles = emptySet()
+                            }) { Text("Cancelar") }
                             IconButton(onClick = requestDeleteSelected, enabled = selectedFiles.isNotEmpty()) {
                                 Icon(Icons.Default.Delete, "Excluir selecionados", tint = MaterialTheme.colorScheme.error)
                             }
+                        } else {
+                            Spacer(Modifier.weight(1f))
+                            TextButton(onClick = { selectionMode = true }) { Text("Selecionar") }
                         }
                     }
                     when {
@@ -269,15 +278,20 @@ private fun ExplorerScreen() {
                         ) {
                             items(deviceSearchResults, key = { it.absolutePath }) { file ->
                                 Card(
-                                    Modifier.fillMaxWidth().clickable {
-                                        if (selectionMode) toggleSelectedFile(file) else openFile(context, file)
-                                    },
+                                    Modifier.fillMaxWidth().combinedClickable(
+                                        onClick = { openFile(context, file) },
+                                        onLongClick = {
+                                            if (file.isFile) toggleSelectedFile(file)
+                                        }
+                                    ),
                                     shape = RoundedCornerShape(14.dp),
-                                    colors = CardDefaults.cardColors(containerColor = Color.White)
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (file in selectedFiles) Color(0xFFE4F4F1) else Color.White
+                                    )
                                 ) {
                                     Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        if (selectionMode && file.isFile) Checkbox(file in selectedFiles, { toggleSelectedFile(file) })
-                                        Icon(iconFor(file), null, tint = Teal, modifier = Modifier.size(30.dp))
+                                        Icon(if (file in selectedFiles) Icons.Default.CheckCircle else iconFor(file), null,
+                                            tint = Teal, modifier = Modifier.size(30.dp))
                                         Column(Modifier.weight(1f).padding(start = 12.dp)) {
                                             Text(file.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
                                                 style = MaterialTheme.typography.titleSmall)
@@ -373,18 +387,24 @@ private fun ExplorerScreen() {
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(files, key = { it.absolutePath }) { file ->
-                        Card(Modifier.fillMaxWidth().clickable {
-                            if (selectionMode && file.isFile) toggleSelectedFile(file)
-                            else if (selectionMode) Unit
-                            else if (file.isDirectory) { folder = file; tab = 1; search = ""; extensionFilter = "Tudo"; refresh++ }
-                            else openFile(context, file)
-                        }, shape = RoundedCornerShape(17.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                        Card(Modifier.fillMaxWidth().combinedClickable(
+                            onClick = {
+                                if (file.isDirectory) { folder = file; tab = 1; search = ""; extensionFilter = "Tudo"; refresh++ }
+                                else openFile(context, file)
+                            },
+                            onLongClick = {
+                                if (file.isFile) toggleSelectedFile(file)
+                            }
+                        ), shape = RoundedCornerShape(17.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (file in selectedFiles) Color(0xFFE4F4F1) else Color.White
+                            ),
                             elevation = CardDefaults.cardElevation(1.dp)) {
                             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically) {
-                                if (selectionMode && file.isFile) Checkbox(file in selectedFiles, { toggleSelectedFile(file) })
-                                if (!file.isDirectory && isImageFile(file)) {
+                                if (file in selectedFiles) {
+                                    Icon(Icons.Default.CheckCircle, null, tint = Teal, modifier = Modifier.size(34.dp))
+                                } else if (!file.isDirectory && isImageFile(file)) {
                                     ImageThumbnail(file)
                                 } else {
                                     Icon(if (file.isDirectory) Icons.Default.Folder else iconFor(file),
