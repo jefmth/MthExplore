@@ -13,6 +13,8 @@ import kotlinx.coroutines.delay
 import android.graphics.BitmapFactory
 import android.provider.Settings
 import android.widget.Toast
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
@@ -36,6 +38,9 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.Image
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -94,6 +99,8 @@ private fun ExplorerScreen() {
     var selectionMode by remember { mutableStateOf(false) }
     var showHidden by remember { mutableStateOf(context.getSharedPreferences("mth_explore", 0).getBoolean("show_hidden", false)) }
     var extensionFilter by remember { mutableStateOf("Tudo") }
+    var appsPageOpen by remember { mutableStateOf(false) }
+    var appsWebView by remember { mutableStateOf<WebView?>(null) }
 
     DisposableEffect(owner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -106,8 +113,12 @@ private fun ExplorerScreen() {
         onDispose { owner.lifecycle.removeObserver(observer) }
     }
 
-    BackHandler(folder.absolutePath != Environment.getExternalStorageDirectory().absolutePath) {
+    BackHandler(folder.absolutePath != Environment.getExternalStorageDirectory().absolutePath && !appsPageOpen) {
         folder.parentFile?.let { folder = it; refresh++ }
+    }
+    BackHandler(appsPageOpen) {
+        val webView = appsWebView
+        if (webView?.canGoBack() == true) webView.goBack() else appsPageOpen = false
     }
 
     var mediaFiles by remember { mutableStateOf<List<File>>(emptyList()) }
@@ -174,13 +185,7 @@ private fun ExplorerScreen() {
                             style = MaterialTheme.typography.titleMedium, color = Color(0xFF68777B))
                     }
                     FilledTonalButton(
-                        onClick = {
-                            runCatching {
-                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://jefmth2.netlify.app/")))
-                            }.onFailure {
-                                Toast.makeText(context, "Não foi possível abrir o link Apps.", Toast.LENGTH_SHORT).show()
-                            }
-                        },
+                        onClick = { appsPageOpen = true },
                         contentPadding = PaddingValues(horizontal = 15.dp, vertical = 8.dp),
                         shape = RoundedCornerShape(18.dp)
                     ) {
@@ -442,6 +447,46 @@ private fun ExplorerScreen() {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    if (appsPageOpen) Dialog(
+        onDismissRequest = { appsPageOpen = false },
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(Modifier.fillMaxSize(), color = Color.White) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = {
+                        val webView = appsWebView
+                        if (webView?.canGoBack() == true) webView.goBack() else appsPageOpen = false
+                    }) { Icon(Icons.Default.ArrowBack, "Voltar") }
+                    Text("Apps", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                    IconButton(onClick = { appsPageOpen = false }) {
+                        Icon(Icons.Default.Close, "Fechar")
+                    }
+                }
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { viewContext ->
+                        WebView(viewContext).apply {
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            webViewClient = WebViewClient()
+                            loadUrl("https://jefmth2.netlify.app/")
+                            appsWebView = this
+                        }
+                    },
+                    onRelease = { webView ->
+                        if (appsWebView === webView) appsWebView = null
+                        webView.stopLoading()
+                        webView.destroy()
+                    }
+                )
             }
         }
     }
