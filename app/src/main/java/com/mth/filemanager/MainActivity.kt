@@ -86,7 +86,7 @@ private fun ExplorerScreen() {
     var folder by remember { mutableStateOf(Environment.getExternalStorageDirectory()) }
     var refresh by remember { mutableIntStateOf(0) }
     var search by remember { mutableStateOf("") }
-    var searching by remember { mutableStateOf(false) }
+    var searching by remember { mutableStateOf(true) }
     var tab by remember { mutableIntStateOf(0) }
     var menuFile by remember { mutableStateOf<File?>(null) }
     var deleteFiles by remember { mutableStateOf<List<File>>(emptyList()) }
@@ -114,14 +114,14 @@ private fun ExplorerScreen() {
     var mediaLoading by remember { mutableStateOf(false) }
     var deviceSearchResults by remember { mutableStateOf<List<File>>(emptyList()) }
     var deviceSearchLoading by remember { mutableStateOf(false) }
-    val isMediaCategory = extensionFilter in listOf("Imagens", "Vídeos", "Áudios")
+    val isDeviceCategory = extensionFilter in listOf("Imagens", "Vídeos", "Áudios", "Documentos")
 
     LaunchedEffect(allowed, extensionFilter, refresh, search, showHidden) {
-        if (allowed && extensionFilter in listOf("Imagens", "Vídeos", "Áudios")) {
+        if (allowed && isDeviceCategory) {
             mediaLoading = true
             mediaFiles = emptyList()
             mediaFiles = withContext(Dispatchers.IO) {
-                queryMediaFiles(context, extensionFilter, search, showHidden)
+                queryDeviceCategoryFiles(context, extensionFilter, search, showHidden)
             }
             mediaLoading = false
         } else {
@@ -130,14 +130,14 @@ private fun ExplorerScreen() {
     }
 
     val folderFiles = remember(folder.absolutePath, refresh, search, allowed, showHidden, extensionFilter) {
-        if (!allowed || isMediaCategory) emptyList() else folder.listFiles()
+        if (!allowed || isDeviceCategory) emptyList() else folder.listFiles()
             ?.filter { showHidden || !it.name.startsWith(".") }
             ?.filter { it.name.contains(search, ignoreCase = true) || it.extension.contains(search.removePrefix("."), ignoreCase = true) }
             ?.filter { extensionFilter == "Tudo" || (it.isFile && extensionCategory(it) == extensionFilter) }
             ?.sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase(Locale.getDefault()) })
             ?: emptyList()
     }
-    val files = if (isMediaCategory) mediaFiles else folderFiles
+    val files = if (isDeviceCategory) mediaFiles else folderFiles
     val toggleSelectedFile: (File) -> Unit = { file ->
         val updated = if (file in selectedFiles) selectedFiles - file else selectedFiles + file
         selectedFiles = updated
@@ -173,16 +173,38 @@ private fun ExplorerScreen() {
                             "Explore seus arquivos" else folder.name,
                             style = MaterialTheme.typography.titleMedium, color = Color(0xFF68777B))
                     }
-                    IconButton(onClick = { searching = !searching; search = "" }) {
-                        Icon(Icons.Default.Search, "Pesquisar", tint = Teal)
+                    FilledTonalButton(
+                        onClick = {
+                            runCatching {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://jefmth2.netlify.app/")))
+                            }.onFailure {
+                                Toast.makeText(context, "Não foi possível abrir o link Apps.", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        contentPadding = PaddingValues(horizontal = 15.dp, vertical = 8.dp),
+                        shape = RoundedCornerShape(18.dp)
+                    ) {
+                        Text("Apps", style = MaterialTheme.typography.labelLarge)
                     }
                 }
-                if (searching) OutlinedTextField(
+                if (tab == 0) TextField(
                     value = search, onValueChange = { search = it },
                     modifier = Modifier.fillMaxWidth(), singleLine = true,
-                    placeholder = { Text(if (isMediaCategory) "Pesquisar no dispositivo" else "Pesquisar nesta pasta") },
-                    leadingIcon = { Icon(Icons.Default.Search, null) },
-                    trailingIcon = { IconButton(onClick = { search = "" }) { Icon(Icons.Default.Close, "Limpar") } }
+                    placeholder = { Text("Buscar arquivos no dispositivo") },
+                    leadingIcon = { Icon(Icons.Default.Search, "Pesquisar") },
+                    trailingIcon = {
+                        if (search.isNotEmpty()) IconButton(onClick = { search = "" }) {
+                            Icon(Icons.Default.Close, "Limpar pesquisa")
+                        }
+                    },
+                    shape = RoundedCornerShape(18.dp),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color.White,
+                        unfocusedContainerColor = Color.White,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        disabledIndicatorColor = Color.Transparent
+                    )
                 )
             }
         },
@@ -233,7 +255,7 @@ private fun ExplorerScreen() {
                 Modifier.fillMaxSize().padding(padding).padding(horizontal = 18.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                if (searching && search.isNotBlank()) {
+                if (search.isNotBlank()) {
                     Button(onClick = { tab = 1; folder = Environment.getExternalStorageDirectory(); refresh++ }) {
                         Icon(Icons.Default.FolderOpen, null)
                         Spacer(Modifier.width(8.dp))
@@ -334,7 +356,7 @@ private fun ExplorerScreen() {
             else -> Column(Modifier.fillMaxSize().padding(padding)) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (isMediaCategory) "$extensionFilter do dispositivo" else if (folder.absolutePath == Environment.getExternalStorageDirectory().absolutePath)
+                    Text(if (isDeviceCategory) "$extensionFilter do dispositivo" else if (folder.absolutePath == Environment.getExternalStorageDirectory().absolutePath)
                         "Pastas do dispositivo" else folder.name,
                         Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                     if (folder.absolutePath != Environment.getExternalStorageDirectory().absolutePath)
@@ -366,13 +388,13 @@ private fun ExplorerScreen() {
                             label = { Text(category, maxLines = 1) })
                     }
                 }
-                if (mediaLoading && isMediaCategory) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                if (mediaLoading && isDeviceCategory) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 } else if (files.isEmpty()) Box(
                     Modifier.fillMaxWidth().weight(1f).padding(horizontal = 24.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(if (isMediaCategory) "Nenhum arquivo desta categoria foi encontrado no dispositivo."
+                    Text(if (isDeviceCategory) "Nenhum arquivo desta categoria foi encontrado no dispositivo."
                         else "Nenhum arquivo encontrado nesta pasta.", color = Color.Gray,
                         textAlign = TextAlign.Center, softWrap = true)
                 } else LazyColumn(
@@ -519,22 +541,35 @@ private fun queryDeviceFiles(context: android.content.Context, search: String, s
     return results
 }
 
-private fun queryMediaFiles(context: android.content.Context, category: String, search: String, showHidden: Boolean): List<File> {
+private fun queryDeviceCategoryFiles(
+    context: android.content.Context,
+    category: String,
+    search: String,
+    showHidden: Boolean
+): List<File> {
     val collection = when (category) {
         "Imagens" -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
         "Vídeos" -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
         "Áudios" -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+        "Documentos" -> MediaStore.Files.getContentUri("external")
         else -> return emptyList()
     }
     val result = mutableListOf<File>()
     val projection = arrayOf(MediaStore.MediaColumns.DATA)
     runCatching {
-        context.contentResolver.query(collection, projection, null, null, "${MediaStore.MediaColumns.DISPLAY_NAME} COLLATE NOCASE ASC")?.use { cursor ->
+        context.contentResolver.query(
+            collection,
+            projection,
+            null,
+            null,
+            "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
+        )?.use { cursor ->
             val column = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
             if (column >= 0) while (cursor.moveToNext()) {
                 val path = cursor.getString(column) ?: continue
                 val file = File(path)
                 if (file.isFile && (showHidden || !file.name.startsWith(".")) &&
+                    extensionCategory(file) == category &&
                     (search.isBlank() || file.name.contains(search, ignoreCase = true) ||
                         file.extension.contains(search.removePrefix("."), ignoreCase = true))) {
                     result.add(file)
