@@ -477,7 +477,7 @@ private fun ExplorerScreen() {
                             settings.javaScriptEnabled = true
                             settings.domStorageEnabled = true
                             webViewClient = WebViewClient()
-                            loadUrl("https://jefmth2.netlify.app/")
+                            loadUrl("https://meusapps-mth.netlify.app/")
                             appsWebView = this
                         }
                     },
